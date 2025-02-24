@@ -8,14 +8,21 @@ Currently, three different pipelines are developed to implement DeepReach for Du
 - NestedAD-Zygote: Custom implementation using nested automatic differentiation with [Lux](https://github.com/LuxDL/Lux.jl) + [LuxCUDA](https://github.com/LuxDL/LuxCUDA.jl) + [Zygote](https://github.com/FluxML/Zygote.jl)
 - SciML-NeuralPDE: Direct application of SciML functionalities with [Lux](https://github.com/LuxDL/Lux.jl) + [LuxCUDA](https://github.com/LuxDL/LuxCUDA.jl) + [NeuralPDE](https://github.com/SciML/NeuralPDE.jl)
 
+### Details
+- [ExactBC](https://arxiv.org/abs/2404.00814) and pretraining are implemented.
+- [Curriculum learning](https://doi.org/10.1109/ICRA48506.2021.9561949) is not implemented yet.
+- HardNet-Reach framework is currently under development.
+
 ### Comparison
-NestedAD-Enzyme is tested on macbook pro with CPU. 
-NestedAD-Zygote and SciML-NeuralPDE are tested on Windows desktop with GPU.
+NestedAD-Enzyme is tested on macbook pro with CPU. Reactant fails to be precompiled on Windows desktop with GPU.
+
+NestedAD-Zygote and SciML-NeuralPDE are tested on both macbook pro with CPU and Windows desktop with GPU.
 
 - Training Speed: NestedAD-Enzyme > NestedAD-Zygote > SciML-NeuralPDE
 - Reliability: NestedAD-Zygote > NestedAD-Enzyme > SciML-NeuralPDE
 
 ## References
+- Somil Bansal - [DeepReach: A Deep Learning Approach to High-Dimensional Reachability](https://doi.org/10.1109/ICRA48506.2021.9561949)
 - Somil Bansal - [DeepReach-public_release](https://github.com/smlbansal/deepreach/tree/public_release)
 - William Sharpless - [DeepReach-hopf_exact_bc](https://github.com/willsharpless/deepreach/tree/hopf_exact_bc)
 - William Sharpless - [HopfReachability](https://github.com/UCSD-SASLab/HopfReachability)

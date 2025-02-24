@@ -1,6 +1,6 @@
 # using MKL
 using Lux, LuxCUDA, Optimisers, ADTypes, Reactant, Enzyme
-using LinearAlgebra, Random, Statistics, Printf, ComponentArrays, JLD2, Plots
+using LinearAlgebra, Random, Statistics, Printf, JLD2, Plots
 
 # Reactant.set_default_backend("cpu")
 const x_dev = reactant_device(; force=true)
@@ -194,7 +194,7 @@ end
 
 # main training: mode_train = 1
 # ps_pre, st_pre = load("res_pretraining.jld2","ps","st")
-@time trained_model = main_DeepReach(; seed=2025, lr0=1.0f-4, max_iter=1000, n_grid_train=10)
+@time trained_model = main_DeepReach(; seed=0, lr0=1.0f-4, max_iter=1000, n_grid_train=16)
 # trained_model = Lux.testmode(trained_model)
 
 ## re-training: mode_train = 1

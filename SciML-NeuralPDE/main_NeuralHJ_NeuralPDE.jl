@@ -1,5 +1,5 @@
-using MKL
-using NeuralPDE, Lux, LuxCUDA, ModelingToolkit, Optimization, OptimizationOptimisers
+# using MKL
+using NeuralPDE, Lux, LuxCUDA, Optimization, OptimizationOptimisers
 using LinearAlgebra, Random, Printf, ComponentArrays, JLD2
 using ModelingToolkit: Interval, infimum, supremum
 

@@ -11,7 +11,7 @@ Currently, three different pipelines are developed to implement DeepReach for Du
 ### Details
 - [ExactBC](https://arxiv.org/abs/2404.00814) and pretraining are implemented.
 - [Curriculum learning](https://doi.org/10.1109/ICRA48506.2021.9561949) is not implemented yet.
-- HardNet-Reach framework is currently under development.
+- [HardNet](https://arxiv.org/abs/2410.10807)-Reach framework is currently under development.
 
 ### Comparison
 NestedAD-Enzyme is tested on macbook pro with CPU. Reactant fails to be precompiled on Windows desktop with GPU.

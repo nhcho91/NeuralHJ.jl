@@ -1,0 +1,274 @@
+# using MKL
+using Lux, LuxCUDA, Zygote, Optimisers, ADTypes
+using LinearAlgebra, Random, Statistics, Printf, ComponentArrays, JLD2, Plots
+# using OnlineStats, CairoMakie, MLUtils, ForwardDiff
+
+const g_dev = gpu_device()
+const c_dev = cpu_device()
+
+# GPU manual memory management (not strictly necessary)
+if !isequal(typeof(g_dev), CPUDevice)
+    GC.gc(true)
+    CUDA.reclaim()
+end
+
+# problem parameters
+const R = 0.25f0
+const v = 0.6f0
+const ω_max = 1.1f0
+
+const t_max = 0.0f0
+const t_min = -1.0f0
+const x_max = 1.0f0
+const x_min = -1.0f0
+const y_max = 1.0f0
+const y_min = -1.0f0
+const θ_max = Float32(pi)
+const θ_min = -Float32(pi)
+
+target_constraint(x, y) = sqrt(x^2 + y^2) - R
+
+@views function in_norm(indvars)
+    return [(indvars[1:1, :] .- t_min) / (t_max - t_min);
+        2.0f0 * (indvars[2:2, :] .- x_min) / (x_max - x_min) .- 1.0f0;
+        2.0f0 * (indvars[3:3, :] .- y_min) / (y_max - y_min) .- 1.0f0;
+        2.0f0 * (indvars[4:4, :] .- θ_min) / (θ_max - θ_min) .- 1.0f0]
+end
+
+function model_construction(n_in, n_out; l_hidden=3, n_hidden=512)
+    model = Lux.Chain(
+        WrappedFunction(in_norm),
+        Dense(n_in, n_hidden, sin),
+        [Dense(n_hidden, n_hidden, sin) for i in 1:l_hidden],
+        Dense(n_hidden, n_out, softplus)
+    )
+    return model
+end
+
+function model_prediction_CPU(in_pred, ps, st; n_hidden=512)
+    model = model_construction(4, 1; n_hidden=n_hidden)
+    (in_pred, ps, st) = (in_pred, ps, st) |> c_dev
+
+    return model(in_pred, ps, st)[1]
+end
+
+@views function value_prediction_GPU(in_pred, ps, st; n_hidden=512)
+    model = model_construction(4, 1; n_hidden=n_hidden)
+    (in_pred, ps, st) = (in_pred, ps, st) |> g_dev
+
+    t, x, y = in_pred[1:1, :], in_pred[2:2, :], in_pred[3:3, :]
+    return target_constraint.(x, y) .+ t .* model(in_pred, ps, st)[1]
+end
+
+@views function loss_function(model, ps, st, (indvars, ∂l_∂indvars))
+    smodel = StatefulLuxLayer{true}(model, ps, st)
+
+    t, θ = indvars[1:1, :], indvars[4:4, :]
+    # ∂l_∂indvars = only(Zygote.gradient(x -> sum(target_constraint.(x[2:2, :], x[3:3, :])), indvars))
+    # ∂l_∂x = ∂l_∂indvars[2:2, :]
+    # ∂l_∂y = ∂l_∂indvars[3:3, :]
+
+    U = smodel(indvars)
+    ∂U_∂indvars = only(Zygote.gradient(sum ∘ smodel, indvars))
+    # ∂U_∂t = ∂U_∂indvars[1:1, :]
+    # ∂U_∂x = ∂U_∂indvars[2:2, :]
+    # ∂U_∂y = ∂U_∂indvars[3:3, :]
+    # ∂U_∂θ = ∂U_∂indvars[4:4, :]
+
+    # ∂V_∂t = U .+ t .* ∂U_∂t
+    # ∂V_∂x = ∂l_∂x .+ t .* ∂U_∂x
+    # ∂V_∂y = ∂l_∂y .+ t .* ∂U_∂y
+    # ∂V_∂θ = t .* ∂U_∂θ
+
+    ∂V_∂t = U .+ t .* ∂U_∂indvars[1:1, :]
+    ∂V_∂x = ∂l_∂indvars[2:2, :] .+ t .* ∂U_∂indvars[2:2, :]
+    ∂V_∂y = ∂l_∂indvars[3:3, :] .+ t .* ∂U_∂indvars[3:3, :]
+    ∂V_∂θ = t .* ∂U_∂indvars[4:4, :]
+
+    loss = mean(abs2, min.(-t .* U, ∂V_∂t .+ ∂V_∂x .* v .* cos.(θ) .+ ∂V_∂y .* v .* sin.(θ) .+ abs.(∂V_∂θ) .* ω_max))
+    # loss = MSELoss()(HJI_PDE, 0f0)
+
+    return (loss, smodel.st, (; loss))
+
+    # dV_dt = ∂V_∂t .+ ∂V_∂x .* v .* cos.(θ) .+ ∂V_∂y .* v .* sin.(θ) .+ abs.(∂V_∂θ) .* ω_max
+    # HJI_PDE = min.(-t .* U, dV_dt)
+    # # sign_dV = relu.(-dV)
+    # min_PDE = minimum(HJI_PDE) 
+    # min_dV_dt = minimum(dV_dt) 
+
+    # HJI_PDE_loss = sum(abs2, HJI_PDE) 
+    # sign_dV_dt_loss = sum(relu, -dV_dt)
+    # loss = HJI_PDE_loss
+
+    # return (loss, smodel.st, (; HJI_PDE_loss, sign_dV_dt_loss, min_PDE, min_dV_dt, dV_dt))
+end
+
+function pretrain_model!(model, ps, st, x_data, y_data; max_iter=5000, lr=1f-3)
+    train_state = Lux.Training.TrainState(model, ps, st, Optimisers.Adam(lr))
+
+    for iter in 1:max_iter
+        _, loss, _, train_state = Lux.Training.single_train_step!(
+            AutoZygote(), MSELoss(),
+            (x_data, y_data), train_state
+        )
+        if iter % 100 == 1
+            @printf "Iteration: %04d \t Loss: %10.9g\n" iter loss
+        end
+        if loss < 1.0f-6
+            break
+        end
+    end
+
+    return model, ps, st, train_state
+end
+
+function train_model!(model, ps, st, in_data, supp_data; max_iter=5000, lr0=1.0f-3)
+    train_state = Lux.Training.TrainState(model, ps, st, Optimisers.Adam(lr0))
+    lr = i -> i < 50000 ? lr0 : (i < 90000 ? 1.0f-1 * lr0 : 1.0f-2 * lr0)
+
+    for iter in 1:max_iter
+        Optimisers.adjust!(train_state, lr(iter))
+        _, loss, stats, train_state = Lux.Training.single_train_step!(
+            AutoZygote(), loss_function,
+            (in_data, supp_data), train_state
+        )
+
+        if iter % 4 == 0 || iter == 1 || iter == max_iter
+            @printf "Iteration: [%6d/%6d] \t Loss: %.9f \t stats.loss: %.9f\n" iter max_iter loss stats.loss
+            GC.gc(true)
+        end
+        # if iter % 25 == 1 || iter == max_iter
+        #     @printf "Iteration: [%6d/%6d] \t Loss: %.9f \t HJI_PDE_loss: %.9f \t sign_dV_dt_loss: %.9f \t min_PDE: %.9f \t min_dV_dt: %.9f\n" iter max_iter loss stats.HJI_PDE_loss stats.sign_dV_dt_loss stats.min_PDE stats.min_dV_dt
+        #     # if iter != 1
+        #     #     GC.gc(true)
+        #     # end
+        # end
+        if iter % 1000 == 0
+            pVU = vis_DeepReach(ps, st; tq=-1f0)
+            savefig(pVU, "./fig_temp/Fig_$(iter).pdf")
+        end        
+        if loss < 1.0f-6
+            break
+        end
+    end
+
+    return model, ps, st, train_state
+end
+
+function main_DeepReach(; seed=0, max_iter=10^5, lr0=1.0f-3, n_hidden=512, n_grid_train=16, ps0=nothing, st0=nothing, mode_train=1)
+    # seeding
+    rng = Random.default_rng()
+    Random.seed!(rng, seed)
+
+    # model construction
+    model = model_construction(4, 1; n_hidden=n_hidden)
+
+    # model initialisation
+    if isnothing(ps0)
+        ps, st = Lux.setup(rng, model) |> g_dev
+    else
+        (ps, st) = (ps0, st0) |> g_dev
+    end
+
+    # training grid definition (input evaluation points) 
+    if mode_train == 0
+        t_grid = [t_max]
+    else
+        t_grid = range(t_min, t_max; length=n_grid_train)
+    end
+    x_grid = filter(!iszero, range(x_min, x_max; length=n_grid_train))
+    y_grid = filter(!iszero, range(y_min, y_max; length=n_grid_train))
+    θ_grid = range(θ_min, θ_max; length=n_grid_train)
+    # in_train = stack([t, x, y, θ] for t in t_grid for x in x_grid for y in y_grid for θ in θ_grid) |> g_dev
+    in_train = stack([t, x, y, θ] for θ in θ_grid for y in y_grid for x in x_grid for t in t_grid) |> g_dev
+    #--> equal to in_train = stack([[elem...] for elem in vec(collect(Iterators.product(t_grid, x_grid, y_grid, θ_grid)))]) |> g_dev
+    ∂l_∂in_train = only(Zygote.gradient(x -> sum(target_constraint.(x[2:2, :], x[3:3, :])), in_train))
+
+    # training
+    if mode_train == 0
+        out_pretrain = repeat([0f0], 1, size(in_train,2)) |> g_dev
+        pretrain_model!(model, ps, st, in_train, out_pretrain; max_iter=max_iter, lr=lr0)
+    else
+        train_model!(model, ps, st, in_train, ∂l_∂in_train; max_iter=max_iter, lr0=lr0)
+    end
+
+    (ps, st) = (ps, st) |> c_dev
+    if mode_train == 0
+        save("res_pretraining.jld2", "ps", ps, "st", st)
+    else
+        save("res_DeepReach_NestedAD_avoid.jld2", "ps", ps, "st", st)
+    end
+
+    return StatefulLuxLayer{true}(model, ps, st)
+end
+
+function vis_DeepReach(ps, st; tq=0f0, θq=0f0, n_grid_pred=100)
+    # t_grid = range(t_min, t_max; length=n_grid_pred)
+    x_grid = filter(!iszero, range(x_min, x_max; length=n_grid_pred))
+    y_grid = filter(!iszero, range(y_min, y_max; length=n_grid_pred))
+    # θ_grid = range(θ_min, θ_max; length=n_grid_pred)
+
+    in_pred = stack([[tq, x, y, θq] for y in y_grid for x in x_grid])
+    V_pred = vec(Array(value_prediction_GPU(in_pred, ps, st)))
+    l_pred = target_constraint.(in_pred[2, :], in_pred[3, :])
+
+    pV = plot(x_grid, y_grid, V_pred, linetype=:contourf, levels=30, aspect_ratio=:equal, cbar=:right, title="V prediction: t = $tq, θ = $θq", xlabel="x", ylabel="y")
+    contour!(pV, x_grid, y_grid, V_pred, levels=[0.0], linecolor=:cyan, linewidth=1)
+    contour!(pV, x_grid, y_grid, l_pred, levels=[0.0], linecolor=:yellow, linewidth=1)
+
+    U_pred = vec(model_prediction_CPU(in_pred, ps, st))
+    pU = plot(x_grid, y_grid, U_pred, linetype=:contour, title="U prediction: t = $tq, θ = $θq", xlabel="x", ylabel="y", levels=30, aspect_ratio=:equal, cbar=:right)
+
+    pVU = plot(pV, pU, size=(1000, 500))
+    # _, _, (_, dV_pred) = loss_function(trained_model.model, trained_model.ps, trained_model.st, (in_pred,))
+    # pdV = plot(x_grid, y_grid, vec(dV_pred), linetype=:contour, title="dV prediction: t = $tq, θ = $θq", xlabel="x", ylabel="y", levels=30, aspect_ratio=:equal, cbar=:right)
+
+    return pVU
+end
+
+# pretraining: mode_train = 0
+@time trained_model = main_DeepReach(; seed=2025, lr0=1.0f-4, max_iter=5000, n_grid_train=16, mode_train=0)
+
+# main training: mode_train = 1
+ps_pre, st_pre = load("res_pretraining.jld2","ps","st")
+@time trained_model = main_DeepReach(; seed=2025, lr0=1.0f-4, max_iter=5000, n_grid_train=16, ps0=ps_pre, st0=st_pre)
+# trained_model = Lux.testmode(trained_model)
+
+## re-training: mode_train = 1
+@time trained_model = main_DeepReach(; seed=2025, lr0=1.0f-4, max_iter=5000, n_grid_train=16, ps0=trained_model.ps, st0=trained_model.st)
+
+# visualisation
+# ps, st = load("res_DeepReach_NestedAD_avoid.jld2","ps","st")
+(ps, st) = (trained_model.ps, trained_model.st)
+
+vis_DeepReach(ps, st; tq=-1f0)
+
+anim = Animation("./fig_temp")
+for tq in t_max:-5f-2:t_min
+    frame(anim, vis_DeepReach(ps, st; tq=tq))
+end
+for θq in 0f0:5f-1:θ_max
+    frame(anim, vis_DeepReach(ps, st; tq=t_min, θq=θq))
+end
+gif(anim, "./anim_fps15.gif", fps = 15)
+
+
+## AD test
+# rng = Random.default_rng()
+# Random.seed!(rng, 2025)
+# model = model_construction(4, 1; n_hidden=512)
+# ps, st = Lux.setup(rng, model) |> g_dev
+
+# # training grid definition (input evaluation points) 
+# n_grid_train=10
+# t_grid = range(t_min, t_max; length=n_grid_train)
+# x_grid = filter(!iszero, range(x_min, x_max; length=n_grid_train))
+# y_grid = filter(!iszero, range(y_min, y_max; length=n_grid_train))
+# θ_grid = range(θ_min, θ_max; length=n_grid_train)
+# in_train = stack([t, x, y, θ] for t in t_grid for x in x_grid for y in y_grid for θ in θ_grid) |> g_dev
+
+# t, θ = in_train[1:1, :], in_train[4:4, :]
+# ∂l_∂in_train = only(Zygote.gradient(x -> sum(target_constraint.(x[2:2, :], x[3:3, :])), in_train))
+
+# L = loss_function(model, ps, st, (in_train, ∂l_∂in_train))[1]
+# dL = Zygote.gradient(ps -> loss_function(model, ps, st, (in_train, ∂l_∂in_train))[1], ps)[1]

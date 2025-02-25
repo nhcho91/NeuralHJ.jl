@@ -6,6 +6,7 @@ Currently, three different pipelines are developed to implement DeepReach for Du
 
 - NestedAD-Enzyme: Custom implementation using nested automatic differentiation with [Lux](https://github.com/LuxDL/Lux.jl) + [Reactant](https://github.com/EnzymeAD/Reactant.jl) + [Enzyme](https://github.com/EnzymeAD/Enzyme.jl)
 - NestedAD-Zygote: Custom implementation using nested automatic differentiation with [Lux](https://github.com/LuxDL/Lux.jl) + [LuxCUDA](https://github.com/LuxDL/LuxCUDA.jl) + [Zygote](https://github.com/FluxML/Zygote.jl)
+- NestedAD: Single environment for convenience in testing NestedAD-Enzyme and NestedAD-Zygote
 - SciML-NeuralPDE: Direct application of SciML functionalities with [Lux](https://github.com/LuxDL/Lux.jl) + [LuxCUDA](https://github.com/LuxDL/LuxCUDA.jl) + [NeuralPDE](https://github.com/SciML/NeuralPDE.jl)
 
 ### Details

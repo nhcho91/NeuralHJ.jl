@@ -63,10 +63,14 @@ end
     return V_pred, U_pred, l_pred
 end
 
-@views function PDE_loss_Zygote(smodel::StatefulLuxLayer, indvars::AbstractArray, ∂l_∂indvars::AbstractArray)
+@views function PDE_loss(smodel::StatefulLuxLayer, indvars::AbstractArray, ∂l_∂indvars::AbstractArray, mode_AD::Int64)
     t, θ = indvars[1:1, :], indvars[4:4, :]
     U = smodel(indvars)
-    ∂U_∂indvars = Zygote.gradient(sum ∘ smodel, indvars)[1]
+    if mode_AD == 0
+        ∂U_∂indvars = Zygote.gradient(sum ∘ smodel, indvars)[1]
+    elseif mode_AD == 1
+        ∂U_∂indvars = Enzyme.gradient(Enzyme.Reverse, sum ∘ smodel, indvars)[1]
+    end
 
     ∂V_∂t = U .+ t .* ∂U_∂indvars[1:1, :]
     ∂V_∂x = ∂l_∂indvars[2:2, :] .+ t .* ∂U_∂indvars[2:2, :]
@@ -76,29 +80,12 @@ end
     return mean(abs2, min.(-t .* U, ∂V_∂t .+ ∂V_∂x .* v .* cos.(θ) .+ ∂V_∂y .* v .* sin.(θ) .+ abs.(∂V_∂θ) .* ω_max))
 end
 
-function loss_function_Zygote(model, ps, st, (indvars, ∂l_∂indvars))
-    smodel = StatefulLuxLayer{true}(model, ps, st)
-    loss = PDE_loss_Zygote(smodel, indvars, ∂l_∂indvars)
-    return (loss, smodel.st, (; loss))
-end
-
-@views function PDE_loss_Enzyme(smodel::StatefulLuxLayer, indvars::AbstractArray, ∂l_∂indvars::AbstractArray)
-    t, θ = indvars[1:1, :], indvars[4:4, :]
-    U = smodel(indvars)
-    ∂U_∂indvars = Enzyme.gradient(Enzyme.Reverse, sum ∘ smodel, indvars)[1]
-
-    ∂V_∂t = U .+ t .* ∂U_∂indvars[1:1, :]
-    ∂V_∂x = ∂l_∂indvars[2:2, :] .+ t .* ∂U_∂indvars[2:2, :]
-    ∂V_∂y = ∂l_∂indvars[3:3, :] .+ t .* ∂U_∂indvars[3:3, :]
-    ∂V_∂θ = t .* ∂U_∂indvars[4:4, :]
-
-    return mean(abs2, min.(-t .* U, ∂V_∂t .+ ∂V_∂x .* v .* cos.(θ) .+ ∂V_∂y .* v .* sin.(θ) .+ abs.(∂V_∂θ) .* ω_max))
-end
-
-function loss_function_Enzyme(model, ps, st, (indvars, ∂l_∂indvars))
-    smodel = StatefulLuxLayer{true}(model, ps, st)
-    loss = PDE_loss_Enzyme(smodel, indvars, ∂l_∂indvars)
-    return (loss, smodel.st, (; loss))
+function loss_function(mode_AD)
+    return function (model, ps, st, (indvars, ∂l_∂indvars))
+        smodel = StatefulLuxLayer{true}(model, ps, st)
+        loss = PDE_loss(smodel, indvars, ∂l_∂indvars, mode_AD)
+        return (loss, smodel.st, (; loss))
+    end
 end
 
 function pretrain_model!(model, ps, st, x_data, y_data; max_iter=5000, lr=1.0f-3)
@@ -126,11 +113,10 @@ function train_model!(model, ps, st, in_data, supp_data; max_iter=5000, lr0=1.0f
 
     if mode_AD == 0
         f_AD = AutoZygote()
-        f_loss = loss_function_Zygote
     elseif mode_AD == 1
         f_AD = AutoEnzyme()
-        f_loss = loss_function_Enzyme
     end
+    f_loss = loss_function(mode_AD)
 
     for iter in 1:max_iter
         # GC.gc()

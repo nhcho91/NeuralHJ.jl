@@ -4,19 +4,17 @@ using LinearAlgebra, Random, Statistics, Printf, JLD2, Plots
 
 # ------[MANUAL SETUP REQUIED]------ #
 mode_train::Int64 = 1      # 0: pretraining  / 1: training (default)
-mode_AD::Int64 = 0         # 0: Zygote       / 1: Enzyme   (default)
+mode_AD::Int64 = 1         # 0: Zygote       / 1: Enzyme   (default)
 # ---------------------------------- #
 
-# Reactant.set_default_backend("cpu")
-const r_dev = reactant_device(; force=true)
-const g_dev = gpu_device()
+# device selection
+Reactant.set_default_backend("cpu")
 const c_dev = cpu_device()
 
-# device selection
 if mode_AD == 0
-    const x_dev = g_dev
+    const x_dev = gpu_device()
 elseif mode_AD == 1
-    const x_dev = r_dev
+    const x_dev = reactant_device(; force=true)
 end
 
 # problem parameters
@@ -128,7 +126,7 @@ function train_model!(model, ps, st, in_data, supp_data; max_iter=5000, lr0=1.0f
 
         if iter % 25 == 0 || iter == 1 || iter == max_iter
             @printf "Iteration: [%6d/%6d] \t Loss: %.9f \t stats.loss: %.9f\n" iter max_iter loss stats.loss
-            display(grads)
+            # display(grads)
             # GC.gc(true)
         end
 
@@ -224,17 +222,17 @@ end
 
 # main training: mode_train = 1
 # ps_pre, st_pre = load("res_pretraining.jld2","ps","st")
-@time trained_model = main_DeepReach(; seed=0, lr0=1.0f-4, max_iter=100, n_grid_train=5, mode_train=mode_train, mode_AD=mode_AD)
+@time trained_model = main_DeepReach(; seed=0, lr0=1.0f-4, max_iter=1000, n_grid_train=16, mode_train=mode_train, mode_AD=mode_AD)
 # trained_model = Lux.testmode(trained_model)
 
 # re-training: mode_train = 1
-# @time trained_model = main_DeepReach(; seed=0, lr0=1.0f-4, max_iter=5000, n_grid_train=5, ps0=trained_model.ps, st0=trained_model.st)
+@time trained_model = main_DeepReach(; seed=0, lr0=1.0f-4, max_iter=1000, n_grid_train=16, ps0=trained_model.ps, st0=trained_model.st, mode_train=mode_train, mode_AD=mode_AD)
 
 # visualisation
 # ps, st = load("res_DeepReach_NestedAD_avoid.jld2","ps","st")
 (ps, st) = (trained_model.ps, trained_model.st)
 
-vis_DeepReach(ps, st; tq=-1.0f0, θq=-Float32(pi))
+vis_DeepReach(ps, st; tq=-1.0f0, θq=Float32(pi/4))
 
 ## animation
 anim = Animation("./fig_temp")

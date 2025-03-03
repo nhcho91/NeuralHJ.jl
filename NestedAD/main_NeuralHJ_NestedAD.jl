@@ -8,7 +8,7 @@ mode_AD::Int64 = 1         # 0: Zygote       / 1: Enzyme   (default)
 # ---------------------------------- #
 
 # device selection
-Reactant.set_default_backend("cpu")
+Reactant.set_default_backend("gpu")
 const c_dev = cpu_device()
 
 if mode_AD == 0
@@ -226,7 +226,7 @@ end
 # trained_model = Lux.testmode(trained_model)
 
 # re-training: mode_train = 1
-@time trained_model = main_DeepReach(; seed=0, lr0=1.0f-4, max_iter=1000, n_grid_train=16, ps0=trained_model.ps, st0=trained_model.st, mode_train=mode_train, mode_AD=mode_AD)
+# @time trained_model = main_DeepReach(; seed=0, lr0=1.0f-4, max_iter=1000, n_grid_train=16, ps0=trained_model.ps, st0=trained_model.st, mode_train=mode_train, mode_AD=mode_AD)
 
 # visualisation
 # ps, st = load("res_DeepReach_NestedAD_avoid.jld2","ps","st")

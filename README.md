@@ -1,13 +1,17 @@
 # NeuralHJ.jl
 Julia Codes for Hamilton-Jacobi Reachability Analysis with Physics-Informed Neural Networks, a.k.a., DeepReach.
 
+
 ## Implementations
 Currently, three different pipelines are developed to implement DeepReach for Dubins3D example.
 
 - NestedAD-Enzyme: Custom implementation using nested automatic differentiation with [Lux](https://github.com/LuxDL/Lux.jl) + [Reactant](https://github.com/EnzymeAD/Reactant.jl) + [Enzyme](https://github.com/EnzymeAD/Enzyme.jl)
 - NestedAD-Zygote: Custom implementation using nested automatic differentiation with [Lux](https://github.com/LuxDL/Lux.jl) + [LuxCUDA](https://github.com/LuxDL/LuxCUDA.jl) + [Zygote](https://github.com/FluxML/Zygote.jl)
-- NestedAD: Single environment for convenience in testing NestedAD-Enzyme and NestedAD-Zygote
 - SciML-NeuralPDE: Direct application of SciML functionalities with [Lux](https://github.com/LuxDL/Lux.jl) + [LuxCUDA](https://github.com/LuxDL/LuxCUDA.jl) + [NeuralPDE](https://github.com/SciML/NeuralPDE.jl)
+
+The codes inside the directory `NestedAD` provides a convenient single entry point in testing NestedAD-Enzyme and NestedAD-Zygote for both single and multiple GPU training.
+- `main_NeuralHJ_NestedAD.jl`: CPU or single-GPU-accelerated training
+- `runvis_NeuralHJ_NestedAD_multiGPU.jl`: multi-GPU-accelerated [distributed data-parallel training](https://lux.csail.mit.edu/dev/manual/distributed_utils) (intended for running on HPC, e.g., HILDA at Cranfield University)
 
 ### Details
 - [ExactBC](https://arxiv.org/abs/2404.00814) and pretraining are implemented.

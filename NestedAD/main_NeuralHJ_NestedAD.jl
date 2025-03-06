@@ -8,12 +8,16 @@ mode_AD::Int64 = 1         # 0: Zygote       / 1: Enzyme   (default)
 # ---------------------------------- #
 
 # device selection
-Reactant.set_default_backend("gpu")
 const c_dev = cpu_device()
 
 if mode_AD == 0
     const x_dev = gpu_device()
 elseif mode_AD == 1
+    if CUDA.functional()
+        Reactant.set_default_backend("gpu")
+    else
+        Reactant.set_default_backend("cpu")
+    end
     const x_dev = reactant_device(; force=true)
 end
 
@@ -222,7 +226,7 @@ end
 
 # main training: mode_train = 1
 # ps_pre, st_pre = load("res_pretraining.jld2","ps","st")
-@time trained_model = main_DeepReach(; seed=0, lr0=1.0f-4, max_iter=1000, n_grid_train=16, mode_train=mode_train, mode_AD=mode_AD)
+@time trained_model = main_DeepReach(; seed=0, lr0=1.0f-4, max_iter=1000, n_grid_train=8, mode_train=mode_train, mode_AD=mode_AD)
 # trained_model = Lux.testmode(trained_model)
 
 # re-training: mode_train = 1
@@ -232,7 +236,7 @@ end
 # ps, st = load("res_DeepReach_NestedAD_avoid.jld2","ps","st")
 (ps, st) = (trained_model.ps, trained_model.st)
 
-vis_DeepReach(ps, st; tq=-1.0f0, θq=Float32(pi/4))
+vis_DeepReach(ps, st; tq=-1.0f0, θq=Float32(pi / 4))
 
 ## animation
 anim = Animation("./fig_temp")

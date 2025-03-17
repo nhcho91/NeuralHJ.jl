@@ -1,23 +1,22 @@
-# using MKL
-using Lux, LuxCUDA, Optimisers, ADTypes, Reactant, Enzyme, Zygote
-using LinearAlgebra, Random, Statistics, Printf, JLD2, Plots
-
 # ------[MANUAL SETUP REQUIED]------ #
 mode_train::Int64 = 1      # 0: pretraining  / 1: training (default)
 mode_AD::Int64 = 1         # 0: Zygote       / 1: Enzyme   (default)
 # ---------------------------------- #
 
+# using MKL
+using Lux, Optimisers, ADTypes
+using LinearAlgebra, Random, Statistics, Printf, JLD2, Plots
+
 # device selection
 const c_dev = cpu_device()
 
 if mode_AD == 0
+    using LuxCUDA, Zygote
     const x_dev = gpu_device()
 elseif mode_AD == 1
-    if CUDA.functional()
-        Reactant.set_default_backend("gpu")
-    else
-        Reactant.set_default_backend("cpu")
-    end
+    using Reactant, Enzyme
+    Reactant.set_default_backend("gpu")
+    # Reactant.set_default_backend("cpu")
     const x_dev = reactant_device(; force=true)
 end
 
@@ -128,17 +127,17 @@ function train_model!(model, ps, st, in_data, supp_data; max_iter=5000, lr0=1.0f
             (in_data, supp_data), train_state
         )
 
-        if iter % 25 == 0 || iter == 1 || iter == max_iter
+        if iter % 100 == 0 || iter == 1 || iter == max_iter
             @printf "Iteration: [%6d/%6d] \t Loss: %.9f \t stats.loss: %.9f\n" iter max_iter loss stats.loss
             # display(grads)
-            # GC.gc(true)
         end
-
+        
         if iter % 1000 == 0
-            pVU = vis_DeepReach(train_state.parameters, train_state.states; tq=-1.0f0)
-            display(pVU)
-            savefig(pVU, "./fig_temp/Fig_$(iter).pdf")
-            save("./fig_temp/res_$(iter).jld2", "ps", ps, "st", st)
+            GC.gc(true)
+        #     pVU = vis_DeepReach(train_state.parameters, train_state.states; tq=-1.0f0)
+        #     display(pVU)
+        #     savefig(pVU, "./fig_temp/Fig_$(iter).pdf")
+        #     save("./fig_temp/res_$(iter).jld2", "ps", ps, "st", st)
         end
         if loss < 1.0f-6
             break
@@ -171,7 +170,7 @@ function main_DeepReach(; seed=0, max_iter=10^5, lr0=1.0f-3, n_hidden=512, n_gri
     end
     x_grid = filter(!iszero, range(x_min, x_max; length=n_grid_train))
     y_grid = filter(!iszero, range(y_min, y_max; length=n_grid_train))
-    θ_grid = range(θ_min, θ_max; length=11)
+    θ_grid = range(θ_min, θ_max; length=n_grid_train)
     in_train = stack([t, x, y, θ] for θ in θ_grid for y in y_grid for x in x_grid for t in t_grid)
     # in_train = stack([[elem...] for elem in vec(collect(Iterators.product(t_grid, x_grid, y_grid, θ_grid)))]) |> x_dev
     if mode_AD == 0
@@ -226,7 +225,7 @@ end
 
 # main training: mode_train = 1
 # ps_pre, st_pre = load("res_pretraining.jld2","ps","st")
-@time trained_model = main_DeepReach(; seed=0, lr0=1.0f-4, max_iter=1000, n_grid_train=8, mode_train=mode_train, mode_AD=mode_AD)
+@time trained_model = main_DeepReach(; seed=0, lr0=1.0f-4, max_iter=10000, n_grid_train=16, mode_train=mode_train, mode_AD=mode_AD)
 # trained_model = Lux.testmode(trained_model)
 
 # re-training: mode_train = 1
@@ -236,7 +235,7 @@ end
 # ps, st = load("res_DeepReach_NestedAD_avoid.jld2","ps","st")
 (ps, st) = (trained_model.ps, trained_model.st)
 
-vis_DeepReach(ps, st; tq=-1.0f0, θq=Float32(pi / 4))
+vis_DeepReach(ps, st; tq=-1.0f0, θq=Float32(0* pi / 4))
 
 ## animation
 anim = Animation("./fig_temp")

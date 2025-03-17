@@ -27,12 +27,15 @@ NestedAD-Zygote and SciML-NeuralPDE are tested on both macbook pro with CPU and 
 - Reliability: NestedAD-Zygote >= NestedAD-Enzyme > SciML-NeuralPDE
 
 ### Training Stats
-NestedAD
+Configuration:
+
+- NestedAD
 - using Lux.jl + Reactant.jl + Enzyme.jl
 - configured to use single GPU (NVIDIA A100-PCIE-40GB) on Linux server
 - evaluating loss function at around 65000 datapoints without mini-batching
 - using 3 hidden layers with 512 nodes per each layer (around 790000 parameters in total)
 - for Dubins3D example
+
 => achieves around 190.3 seconds / 10000 epochs (except compilation time)
 
 ## References
